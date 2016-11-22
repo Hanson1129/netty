@@ -219,7 +219,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
         private final ChannelHandler childHandler;
         private final Entry<ChannelOption<?>, Object>[] childOptions;
         private final Entry<AttributeKey<?>, Object>[] childAttrs;
-        private final Class<LoadedRunnable> recoverTaskClazz;
+        private final ReadRecoverTask recoverTaskFactory;
 
         ServerBootstrapAcceptor(
                 EventLoopGroup childGroup, ChannelHandler childHandler,
@@ -228,7 +228,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             this.childHandler = childHandler;
             this.childOptions = childOptions;
             this.childAttrs = childAttrs;
-            this.recoverTaskClazz = LoadedRunnable.class;
+            this.recoverTaskFactory = new ReadRecoverTask();
         }
 
         @Override
@@ -278,23 +278,27 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
                 // stop accept new connections for 1 second to allow the channel to recover
                 // See https://github.com/netty/netty/issues/1328
                 config.setAutoRead(false);
-                LoadedRunnable loadedRunnable = recoverTaskClazz.newInstance();
-                loadedRunnable.config = config;
-                ctx.channel().eventLoop().schedule(loadedRunnable, 1, TimeUnit.SECONDS);
+                ctx.channel().eventLoop().schedule(recoverTaskFactory.of(ctx.channel()), 1, TimeUnit.SECONDS);
             }
             // still let the exceptionCaught event flow through the pipeline to give the user
             // a chance to do something with it
             ctx.fireExceptionCaught(cause);
         }
 
-        static class LoadedRunnable implements Runnable {
+        static class ReadRecoverTask implements Runnable {
 
-            private ChannelConfig config;
+            ReadRecoverTask of(Channel channel) {
+                ReadRecoverTask recoverTask = new ReadRecoverTask();
+                recoverTask.channel = channel;
+                return recoverTask;
+            }
+
+            private Channel channel;
 
             @Override
             public void run() {
-                if (config != null) {
-                    config.setAutoRead(true);
+                if (channel != null && channel.config() != null) {
+                    channel.config().setAutoRead(true);
                 }
             }
         }
